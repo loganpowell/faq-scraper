@@ -64,6 +64,10 @@ const fetchArticle = async (page, qLink, acc, i, PAGE) => {
     }
 }
 
+/**
+ * TODO:
+ * Make work with "..." pagination (or just kludge)
+ */
 ;(async () => {
     const browser = await puppeteer.launch({
         headless: false,
