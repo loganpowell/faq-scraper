@@ -180,6 +180,31 @@ const height = 2000
     recycle: true, //<--
 })
 
+const getCurrentTopicHandle = async (page, index) => {
+    const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
+    return topics[index]
+}
+
+const getCurrentSubtopicHandle = async (page, topic_idx, subtopic_idx) => {
+    const currentTopic = await getCurrentTopicHandle(page, topic_idx)
+    //console.log({ currentTopic })
+    const topicEl = await currentTopic.$('.content-inner')
+    const topicText = await topicEl.getProperty('innerText')
+    const topic_name = await topicText.jsonValue()
+    console.log({ topic_name })
+    const topicParent = await currentTopic.getProperty('parentNode')
+    const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
+    return subtopicEls[subtopic_idx]
+}
+
+/**
+ * TODO:
+ * - handle paginated subtopic results
+ * - sometimes it just breaks:
+ *   - enable starting at a specific subtopic index
+ *   - store results and return on error (try catch)
+ *
+ */
 const topicPaginator = async (list = 0, progress = []) => {
     console.log('topicPaginator', `list = ${list}`)
     const browser = await puppeteer.launch({
@@ -194,61 +219,158 @@ const topicPaginator = async (list = 0, progress = []) => {
     await page.goto(url)
 
     await page.waitForNetworkIdle()
-    /* ignore coverage */
-    const topicMenu = await page.$("[node_name='TaxonomyListTree']")
 
     const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
 
-    const out = await topics.reduce(async (a, c, i, d) => {
-        const acc = await a
+    const out = await topics.reduce(async (a, c, topic_idx, d) => {
+        const { page, data } = await a
+        if (topic_idx !== 0) {
+            c = await getCurrentTopicHandle(page, topic_idx)
+        }
         c.click()
         await page.waitForNetworkIdle()
+        await page.waitForTimeout(2000)
         const topicEl = await c.$('.content-inner')
         const topicText = await topicEl.getProperty('innerText')
         const topic_name = await topicText.jsonValue()
         console.log({ topic_name })
         const topicParent = await c.getProperty('parentNode')
         const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
-        const subtopics = await subtopicEls.reduce(async (a, c, i, d) => {
-            const acc = await a
-            const subtopicEl = await c.$('td')
-            const subTopicText = await subtopicEl.getProperty('innerText')
-            const subtopic_name = await subTopicText.jsonValue()
-            console.log({ subtopic_name })
-            return [...acc, { subtopic_name }]
-        }, Promise.resolve([]))
-        return [...acc, { [topic_name]: subtopics }]
-    }, Promise.resolve([]))
+        const subtopics = await subtopicEls.reduce(
+            async (a, c, subtopic_idx, d) => {
+                const { page, data } = await a
+                if (subtopic_idx !== 0) {
+                    c = await getCurrentSubtopicHandle(
+                        page,
+                        topic_idx,
+                        subtopic_idx
+                    )
+                }
+                let subtopicEl = await c.$('td')
+                // load faqs for subtopic
+                const subTopicText = await subtopicEl.getProperty('innerText')
+                const subtopic_name = await subTopicText.jsonValue()
+                console.log({ subtopic_name })
+
+                await subtopicEl.click()
+                await page.waitForNetworkIdle()
+                await page.waitForTimeout(2000)
+
+                //if (list !== 0) {
+                //    await skipFirstPages(page)
+                //}
+
+                let elementHandles = await page.$$('a.KM_Article_link')
+
+                let tmp = []
+                //console.log({ elementHandles })
+                try {
+                    const faqs = await elementHandles.reduce(
+                        async (a, c, i, d) => {
+                            const { page, data } = await a
+                            const pagination = await page.$('.pagination-links')
+                            // not the first FAQ, need to grab the handes again
+                            if (i !== 0) {
+                                let newHandles = await page.$$(
+                                    'a.KM_Article_link'
+                                )
+                                const newAcc = await fetchArticle(
+                                    page,
+                                    newHandles[i],
+                                    tmp,
+                                    i,
+                                    0,
+                                    list
+                                )
+                                //console.log('not first', { newAcc })
+                                return { page, data: [...data, ...newAcc] }
+                            }
+                            if (pagination) {
+                                // parsePaginatedPage
+                                //
+                                console.log('pagination found')
+                            }
+                            const newAcc = await fetchArticle(
+                                page,
+                                c,
+                                tmp,
+                                i,
+                                0,
+                                list
+                            )
+                            console.log({ newAcc })
+                            return { page, data: [...data, ...newAcc] }
+                        },
+                        Promise.resolve({ page, data: [] })
+                    )
+
+                    return {
+                        page,
+                        data: [...data, { subtopic_name, faqs: faqs.data }],
+                    }
+                } catch (err) {
+                    console.log('SHIT:', err)
+                    console.log('progress report:\n', tmp)
+                }
+
+                //const candidates = await parsePage(elementHandles)
+            },
+            Promise.resolve({ page, data: [] })
+        )
+
+        return await { page, data: [...data, { [topic_name]: subtopics }] }
+    }, Promise.resolve({ page, data: [] }))
 
     console.log({ out })
     //const todos = Array.from(topics).map((bloop) => console.log({ bloop }))
     //console.log({ topics })
 
+    // using evaluate ///////////////////////////////////////////////
+
     //const body = await page.$('body')
-    //console.log({ body })
+    ////console.log({ body })
 
-    //page.on('console', (log) => console[log._type](log._text))
-
-    //const nodeList = await page.evaluate((_body) => {
-    //console.log('in body', _body)
-    //return _body
-    //return _body.querySelector("[node_name='TaxonomyListTree']")
-    //let table = _body.querySelector("[node_name='TaxonomyListTree']")
-
-    //let topics = table.querySelectorAll(
-    //    "[node_name='TaxonomyListTreeInner']"
+    //page.on('console', (message) =>
+    //    console.log(
+    //        `${message.type().substr(0, 3).toUpperCase()} ${message.text()}`
+    //    )
     //)
-    //return Array.from(topics).map((topic) => {
-    //    topic.click()
-    //    const subtopics = topic.querySelectorAll('tr[data-gargs*=TAX')
-    //    const payload = Array.from(subtopics).reduce((a, c, i, d) => {
-    //        const text = c.querySelector('td').innerText
-    //        return { ...a, [`${text.replace(' ', '_')}`]: text }
-    //    }, {})
-    //    return payload
-    //})
-    //}, body)
+    //    .on('pageerror', ({ message }) => console.log(message))
+    //    .on('response', (response) =>
+    //        console.log(`${response.status()} ${response.url()}`)
+    //    )
+    //    .on('requestfailed', (request) =>
+    //        console.log(`${request.failure().errorText} ${request.url()}`)
+    //    )
+
+    //const nodeList = await page.evaluate(
+    //    /* ignore coverage */ (_body) => {
+    //        //console.log('in body', _body)
+    //        //return _body.querySelector("[node_name='TaxonomyListTree']")
+    //        let table = _body.querySelector("[node_name='TaxonomyListTree']")
+
+    //        let topics = table.querySelectorAll(
+    //            "[node_name='TaxonomyListTreeInner']"
+    //        )
+    //        return Array.from(topics).map((topic) => {
+    //            //topic.click()
+    //            const subtopics = topic.querySelectorAll('tr[data-gargs*=TAX')
+    //            console.log(subtopics.toString())
+    //            return Array.from(subtopics).map((st) => st.innerHTML)
+    //            const payload = Array.from(subtopics).reduce((a, c, i, d) => {
+    //                console.log({ c })
+    //                const text = c.querySelector('td').innerText
+    //                console.log({ text })
+    //                return [...a, { text }]
+    //            }, [])
+    //            return payload
+    //        })
+    //    },
+    //    body
+    //)
     //console.log({ nodeList })
+
+    /////////////////////////////////////////////// using evaluate //
 
     browser.close()
 }
@@ -276,7 +398,6 @@ const searchPaginator = async (list = 0, progress = []) => {
 
     const parsePage = configParsePage({
         page,
-        elementHandles,
         browser,
         list,
         progress,
