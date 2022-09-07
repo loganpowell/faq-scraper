@@ -1,0 +1,20 @@
+[
+  {
+    "questionText": "How will the American people verify the calculations behind the Census Bureau’s differentially private data?",
+    "answerMD": "The Census Bureau will release the exact software used to compute the differentially private publication data, all of the components associated with the disclosure avoidance system, and the privacy parameter values. This is the same standard of assurance that has been widely adopted to verify the security of cryptographic algorithms and implementations.  \n\nSee also:  [Statistical Safeguards](https://www.census.gov/about/policies/privacy/statistical_safeguards.html \"Statistical Safeguards\")",
+    "PAGE": 0,
+    "i": 0
+  },
+  {
+    "questionText": "How can I tell if the respondent was the reference person in the American Housing Survey (AHS) public use file (PUF)?",
+    "answerMD": "The reference person is used to order the relationships among the persons in the household; the respondent is the person who answered the questions in the AHS interview.  \n  \n\n1.  In 1997 and later surveys, to determine if the reference person and the respondent are the same:\n\n*   If DLINE1=PLINE and for that person REL=1 or REL=2, then the respondent is the household reference person.\n*   If DLINE1=PLINE and REL>2 then the respondent is not the household reference person.\n*   You can identify the relationship of the respondent based on the REL variable.\n*   If DLINE1=B (so no one living in the unit), then check RESPTYP, and that will report the type of respondent.  \n      \n    \n\n3.  In surveys, before 1997, there is no RESPTYP. Instead, DLINE1 contains special codes if the respondent is not the reference person. This will occur only for vacant or URE interviews (ISTATUS not equal to 1).",
+    "PAGE": 0,
+    "i": 1
+  },
+  {
+    "questionText": "In the United States Constitution, the census is required for the apportionment of representatives; why does the ACS ask for more than just the number of people in a home?",
+    "answerMD": "The United States Constitution states that \"\\[An\\] Enumeration shall be made within three Years after the first Meeting of the Congress of the United States, and within every subsequent Term of ten Years, in such Manner as they shall by Law direct.\" Pursuant to this constitutional directive, Congress passed separate laws for each decennial census and specified the information to be collected. In 1954, Congress codified earlier census acts and all other statutes authorizing the decennial census as Title 13, United States Code (U.S.C.). From the very first census act, Congress sought the collection of more information than just a headcount. \n\nBecause the American Community Survey (ACS) is part of the Decennial Census Program, it is governed by the same laws as the census. The current legal authority for collecting these data resides in Title 13 of the U.S.C. or the \"Census Act.\" The Census Act provides the Census Bureau with legal authority to conduct the decennial census and delegates broad discretionary authority to the Secretary of Commerce for determining the manner of conducting the census. This authority has been redelegated by the Secretary to the Director of the Census Bureau.\n\nEven though Congress has granted this broad discretionary authority, the questions asked in the Census and ACS are determined by what data are needed to implement a vast array of federal programs. Courts routinely have upheld the constitutionality of collecting census data, characterizing as unquestionable the power of Congress to require both an enumeration and the collection of statistics in the census.\n\nThe Courts have held that the Constitution, including the Fifth and Fourth Amendments, does not prohibit the gathering of other statistics in addition to the enumeration.",
+    "PAGE": 0,
+    "i": 2
+  }
+]

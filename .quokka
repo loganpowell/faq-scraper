@@ -1,0 +1,15 @@
+{
+    "babel": false,
+    "env": {
+        "params": {
+            "env": "NODE_PATH=./src"
+        }
+    },
+    "plugins": [
+        "jsdom-quokka-plugin"
+    ],
+    "recycle": true,
+    "hints": {
+        "ignoreCoverage": "/ignore coverage/"
+    }
+}

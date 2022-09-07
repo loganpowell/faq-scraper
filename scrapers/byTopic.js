@@ -1,9 +1,9 @@
 //import { JSDOM } from 'jsdom'
 //import fetch from 'node-fetch'
-import puppeteer from 'puppeteer'
-import TurndownService from 'turndown'
-import fs from 'fs'
-const html2MD = TurndownService()
+const puppeteer = require('puppeteer')
+//const TurndownService = require('turndown')
+const fs = require('fs')
+//const html2MD = TurndownService()
 
 const headers = {
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
@@ -12,7 +12,7 @@ const headers = {
 }
 
 const url =
-    'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk1_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
+    'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk2_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
 
 const getHtml = async () => {
     const html = await fetch(url, {
@@ -29,10 +29,6 @@ const getHtml = async () => {
 
     console.log(window)
 }
-
-const width = 1024
-const height = 2000
-//getHtml();
 
 const getIndexByClassName = (className, list) => {
     return list.findIndex((x) => x.className === className)
@@ -63,6 +59,20 @@ const skipFirstPages = async (page) => {
     await page.waitForNetworkIdle()
 }
 
+const export_structure = {
+    id: 'String',
+    tags: ['String', 'String', '...'],
+    content: {
+        title: 'String',
+        markUpText: 'HTML String',
+    },
+    folderMetadata: {
+        folderId: 'String', // subtopic ID
+        name: 'String', // subtopic name
+        parentId: 'String', // topic ID
+    },
+}
+
 const fetchArticle = async (page, qLink, acc, i, PAGE, list = 0) => {
     console.log('fetchArticle', { PAGE, list })
     try {
@@ -79,7 +89,7 @@ const fetchArticle = async (page, qLink, acc, i, PAGE, list = 0) => {
             await answerNode.getProperty('innerHTML')
         ).jsonValue()
 
-        const answerMD = await html2MD.turndown(answerHTML)
+        //const answerMD = await html2MD.turndown(answerHTML)
         const backLink = await page.$('[data-ctl]')
         backLink.click()
         await page.waitForNetworkIdle()
@@ -89,33 +99,15 @@ const fetchArticle = async (page, qLink, acc, i, PAGE, list = 0) => {
             await page.waitForNetworkIdle()
         }
 
-        return acc.concat({ questionText, answerMD, PAGE, i })
+        return acc.concat({ questionText, answerHTML, PAGE, i })
     } catch (err) {
         console.log({ PAGE, i, err })
         return acc.concat({ PAGE, i })
     }
 }
 
-const bigPaginator = async (list = 0, progress = []) => {
-    console.log('bigPaginator', `list = ${list}`)
-    const browser = await puppeteer.launch({
-        headless: false,
-        defaultViewport: { width: width, height: height },
-    })
-    const page = await browser.newPage()
-    await page.setViewport({ width: width, height: height })
-    await page.goto(url)
-    await page.type('[name="$PKMHelpPortal$pKMSearchText"]', 'the')
-    await page.click('[data-click="...."]')
-    await page.waitForNetworkIdle()
-    //page.
-
-    if (list !== 0) {
-        await skipFirstPages(page)
-    }
-    let elementHandles = await page.$$('a.KM_Article_link')
-
-    const parsePage = async (elementHandles, PAGE = 0) => {
+const configParsePage = ({ page, progress, list, browser }) =>
+    async function parsePage(elementHandles, PAGE = 0) {
         try {
             return await elementHandles.reduce(async (a, qLink, i) => {
                 const acc = await a
@@ -180,6 +172,116 @@ const bigPaginator = async (list = 0, progress = []) => {
         }
     }
 
+const width = 1024
+const height = 2000
+//getHtml();
+
+;({
+    recycle: true, //<--
+})
+
+const topicPaginator = async (list = 0, progress = []) => {
+    console.log('topicPaginator', `list = ${list}`)
+    const browser = await puppeteer.launch({
+        headless: false,
+        defaultViewport: {
+            width,
+            height,
+        },
+    })
+    const page = await browser.newPage()
+    await page.setViewport({ width: width, height: height })
+    await page.goto(url)
+
+    await page.waitForNetworkIdle()
+    /* ignore coverage */
+    const topicMenu = await page.$("[node_name='TaxonomyListTree']")
+
+    const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
+
+    const out = await topics.reduce(async (a, c, i, d) => {
+        const acc = await a
+        c.click()
+        await page.waitForNetworkIdle()
+        const topicEl = await c.$('.content-inner')
+        const topicText = await topicEl.getProperty('innerText')
+        const topic_name = await topicText.jsonValue()
+        console.log({ topic_name })
+        const topicParent = await c.getProperty('parentNode')
+        const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
+        const subtopics = await subtopicEls.reduce(async (a, c, i, d) => {
+            const acc = await a
+            const subtopicEl = await c.$('td')
+            const subTopicText = await subtopicEl.getProperty('innerText')
+            const subtopic_name = await subTopicText.jsonValue()
+            console.log({ subtopic_name })
+            return [...acc, { subtopic_name }]
+        }, Promise.resolve([]))
+        return [...acc, { [topic_name]: subtopics }]
+    }, Promise.resolve([]))
+
+    console.log({ out })
+    //const todos = Array.from(topics).map((bloop) => console.log({ bloop }))
+    //console.log({ topics })
+
+    //const body = await page.$('body')
+    //console.log({ body })
+
+    //page.on('console', (log) => console[log._type](log._text))
+
+    //const nodeList = await page.evaluate((_body) => {
+    //console.log('in body', _body)
+    //return _body
+    //return _body.querySelector("[node_name='TaxonomyListTree']")
+    //let table = _body.querySelector("[node_name='TaxonomyListTree']")
+
+    //let topics = table.querySelectorAll(
+    //    "[node_name='TaxonomyListTreeInner']"
+    //)
+    //return Array.from(topics).map((topic) => {
+    //    topic.click()
+    //    const subtopics = topic.querySelectorAll('tr[data-gargs*=TAX')
+    //    const payload = Array.from(subtopics).reduce((a, c, i, d) => {
+    //        const text = c.querySelector('td').innerText
+    //        return { ...a, [`${text.replace(' ', '_')}`]: text }
+    //    }, {})
+    //    return payload
+    //})
+    //}, body)
+    //console.log({ nodeList })
+
+    browser.close()
+}
+
+topicPaginator() //?
+
+const searchPaginator = async (list = 0, progress = []) => {
+    console.log('searchPaginator', `list = ${list}`)
+    const browser = await puppeteer.launch({
+        headless: false,
+        defaultViewport: { width: width, height: height },
+    })
+    const page = await browser.newPage()
+    await page.setViewport({ width: width, height: height })
+    await page.goto(url)
+    await page.type('[name="$PKMHelpPortal$pKMSearchText"]', 'the')
+    await page.click('[data-click="...."]')
+    await page.waitForNetworkIdle()
+    //page.
+
+    if (list !== 0) {
+        await skipFirstPages(page)
+    }
+    let elementHandles = await page.$$('a.KM_Article_link')
+
+    const parsePage = configParsePage({
+        page,
+        elementHandles,
+        browser,
+        list,
+        progress,
+    })
+
     const candidates = await parsePage(elementHandles)
 
     const content = candidates.filter((x) => !!x)
@@ -198,7 +300,7 @@ const getAllPages = async () => {
     try {
         await [0 /*,1 */].reduce(async (a, c) => {
             const acc = await a
-            const content = await bigPaginator(c, acc)
+            const content = await searchPaginator(c, acc)
             return acc.concat(content)
         }, Promise.resolve([]))
     } catch (error) {
@@ -215,4 +317,4 @@ const getAndSaveAllPages = async () => {
     )
 }
 
-getAllPages() //?
+//getAllPages() //?
