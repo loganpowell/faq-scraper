@@ -25,10 +25,11 @@ const taginator = (str) =>
         remove_duplicates: true,
     })
 
-const scrapeFAQ = async ({ page, el, acc, topic_idx, subtopic_idx, topic_name, subtopic_name }) => {
+const scrapeFAQ = async ({ page, faqLink, acc, topic_name, subtopic_name }) => {
     try {
-        const questionText = await (await el.getProperty('textContent')).jsonValue()
-        await el.click()
+        await page.waitForNetworkIdle()
+        const questionText = await (await faqLink.getProperty('textContent')).jsonValue()
+        await faqLink.click()
         await page.waitForNetworkIdle()
         await page.waitForTimeout(100)
         const answerNodeCandidates = await page.$$('div.content-inner')
@@ -38,8 +39,9 @@ const scrapeFAQ = async ({ page, el, acc, topic_idx, subtopic_idx, topic_name, s
         //const answerMD = await html2MD.turndown(answerHTML)
         const backLink = await page.$('[data-ctl]')
         // returns to first faq results page
-        backLink.click()
+        await backLink.click()
         await page.waitForNetworkIdle()
+        //console.log('waiting for page to rerender after clicking back...')
         await page.waitForTimeout(100)
 
         const output = {
@@ -55,12 +57,18 @@ const scrapeFAQ = async ({ page, el, acc, topic_idx, subtopic_idx, topic_name, s
                 parentId: snake_caser(topic_name),
             },
         }
-        console.log('FAQ scraped:', questionText)
+        console.log(`
+            FAQ scraped: ${questionText}
+            topic: ${topic_name}
+            subtopic: ${subtopic_name}
+        `)
         return acc.concat(output)
     } catch (Error) {
         console.warn('ERROR: scrapeFAQ')
         console.log(Error)
         //acc = acc.concat({ topic_idx, subtopic_idx })
+        await page.waitForTimeout(100)
+
         return acc
     }
 }
@@ -76,7 +84,7 @@ const getCurrentSubtopicHandle = async (page, topic_idx, subtopic_idx) => {
     const topicEl = await currentTopic.$('.content-inner')
     const topicText = await topicEl.getProperty('innerText')
     const topic_name = await topicText.jsonValue()
-    console.log({ topic_name })
+    //console.log({ topic_name })
     const topicParent = await currentTopic.getProperty('parentNode')
     const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
     return subtopicEls[subtopic_idx]
@@ -85,114 +93,92 @@ const getCurrentSubtopicHandle = async (page, topic_idx, subtopic_idx) => {
 const json_dir = './json-results/topics.json'
 
 const cfg__linksReducer =
-    ({ topic_idx, subtopic_idx, topic_name, subtopic_name, on_page = 0 }) =>
+    ({ topic_name, subtopic_name, on_page = 0 }) =>
     async (a, c, i, d) => {
         let { page, data: progress } = await a
-        await page.waitForNetworkIdle()
 
-        const pagination = await page.$('.pagination-links')
+        console.log(`FAQ list item ${i} on page ${on_page}:`)
 
-        const faqLinks = await page.$$('a.KM_Article_link')
+        const paginationMenu = await page.$('.pagination-links')
 
-        // WIP ///////////////////////////////////////////////
         try {
-            if (pagination) {
-                //console.log('👀 pagination found')
-                const pageLinks = await pagination.$$('a')
+            if (paginationMenu) {
+                const pageLinks = await paginationMenu.$$('a')
                 const next_page = on_page + 1
-
-                /**
-                 * if not first page of results, navigate to proper page
-                 */
                 if (on_page) {
-                    console.log('👉 ON ANOTHER PAGE: ', on_page)
-
                     const thisPageLink = pageLinks[on_page]
-                    //console.log({ thisPageLink })
-                    //await page.waitForTimeout(1000)
-                    /**
-                     * click on the pagination link for the current page...
-                     */
+
+                    console.log(`clicking on THIS page 👆 -> ${on_page}`)
                     await thisPageLink.click()
                     await page.waitForNetworkIdle()
-
-                    //console.log('💧 WAITING FOR thisPageLink.click() to effect page')
                     await page.waitForTimeout(100)
-                    /**
-                     * grab the FAQ links again after click()
-                     */
-                    const newLinks = await page.$$('a.KM_Article_link')
-                    c = newLinks[i]
                 }
-                /**
-                 * if not the first faq on the page, rebuild handlers
-                 */
-                if (i) {
-                    /**
-                     * grab the FAQ links again after click()
-                     */
-                    const newLinks = await page.$$('a.KM_Article_link')
-                    c = newLinks[i]
-                    //await page.waitForNetworkIdle()
-                    /**
-                     * last faq on list in this page
-                     */
-                    if (d.length === i + 1) {
-                        /**
-                         * retake links (they change in size depending on where you are in the list)
-                         */
-                        const updatedPagination = await page.$('.pagination-links')
-                        const updatedPageLinks = await updatedPagination.$$('a')
-                        console.log('🔍 updatedPageLinks.length:', updatedPageLinks.length)
-                        console.log('🔍 on_page:', on_page)
-                        console.log('🙌 NEXT PAGE COMING UP:', next_page)
 
-                        const newAcc = await scrapeFAQ({
-                            page,
-                            el: c,
-                            acc: progress,
-                            topic_idx,
-                            subtopic_idx,
-                            topic_name,
-                            subtopic_name,
-                        })
-                        // 👀
-                        if (updatedPageLinks.length === on_page + 1) {
-                            console.log('🔥 Last FAQ on last page! Should move on to next Subtopic')
-                            return {
-                                page,
-                                data: newAcc,
-                            }
-                        }
-                        const nextLinksReducer = cfg__linksReducer({
-                            topic_idx,
-                            subtopic_idx,
-                            topic_name,
-                            subtopic_name,
-                            on_page: next_page,
-                        })
+                // faqLinks are lost every iteration
+                const faqLinks = await page.$$('a.KM_Article_link')
 
-                        await page.waitForTimeout(100)
+                // LAST LINK ON LAST PAGE ///////////////////////////////////////////////
 
-                        const { data } = await newLinks.reduce(
-                            nextLinksReducer,
-                            Promise.resolve({ page, data: newAcc })
-                        )
+                if (faqLinks.length === i + 1) {
+                    console.log(
+                        'last faq link in list/page\n' +
+                            '<...> retargeting :\n' +
+                            '(list size changes depending where you are in the list)\n' +
+                            `🔍 on_page: ${on_page}\n` +
+                            `🙌 PAGE COMING UP NEXT: ${next_page}`
+                    )
+
+                    const newAcc = await scrapeFAQ({
+                        page,
+                        faqLink: faqLinks[i],
+                        acc: progress,
+                        topic_name,
+                        subtopic_name,
+                    })
+                    await page.waitForNetworkIdle()
+                    await page.waitForTimeout(1000)
+                    const updatedPagination = await page.$('.pagination-links')
+                    const updatedPageLinks = await updatedPagination.$$('a')
+                    const pages_number = updatedPageLinks.length - 2
+
+                    if (pages_number === on_page) {
+                        console.log('🔥 last item in list on last page 🔥')
                         return {
                             page,
-                            data,
+                            data: newAcc,
                         }
                     }
+
+                    const nextPageLink = updatedPageLinks[next_page]
+
+                    console.log(`clicking on NEXT page 👆 -> ${next_page}`)
+                    await nextPageLink.click()
+                    await page.waitForNetworkIdle()
+                    await page.waitForTimeout(100)
+                    const nextFaqLinks = await page.$$('a.KM_Article_link')
+
+                    const nextLinksReducer = cfg__linksReducer({
+                        topic_name,
+                        subtopic_name,
+                        on_page: next_page,
+                    })
+
+                    const { data } = await nextFaqLinks.reduce(
+                        nextLinksReducer,
+                        Promise.resolve({ page, data: newAcc })
+                    )
+                    return {
+                        page,
+                        data,
+                    }
                 }
-                /**
-                 * not on first page and first FAQ on that page
-                 */
+                /////////////////////////////////////////////// LAST LINK ON LAST PAGE //
+
+                //const faqLinks = await page.$$('a.KM_Article_link')
                 const newAcc = await scrapeFAQ({
                     page,
-                    el: c,
+                    faqLink: faqLinks[i],
                     acc: progress,
-                    topic_idx,
-                    subtopic_idx,
                     topic_name,
                     subtopic_name,
                 })
@@ -202,21 +188,12 @@ const cfg__linksReducer =
                     data: newAcc,
                 }
             }
-            /////////////////////////////////////////////// WIP //
 
-            // not the first FAQ, need to grab the handes again
-            if (i) {
-                //console.log('not first faq on page')
-                //console.log({ links })
-                c = faqLinks[i]
-            }
-
+            const faqLinks = await page.$$('a.KM_Article_link')
             const newAcc = await scrapeFAQ({
                 page,
-                el: c,
+                faqLink: faqLinks[i],
                 acc: progress,
-                topic_idx,
-                subtopic_idx,
                 topic_name,
                 subtopic_name,
             })
@@ -240,7 +217,7 @@ const cfg__subtopicsReducer =
         if (subtopic_idx) {
             c = await getCurrentSubtopicHandle(page, topic_idx, subtopic_idx)
         }
-        console.log("getting c.$('td') in subtopicsReducer")
+        //console.log("getting c.$('td') in subtopicsReducer")
         let subtopicEl = await c.$('td')
         // load faqs for subtopic
         const subTopicText = await subtopicEl.getProperty('innerText')
@@ -252,7 +229,7 @@ const cfg__subtopicsReducer =
 
         await subtopicEl.click()
         await page.waitForNetworkIdle()
-        await page.waitForTimeout(100)
+        //await page.waitForTimeout(100)
 
         //await page.waitForTimeout(1000)
 
@@ -260,9 +237,9 @@ const cfg__subtopicsReducer =
 
         //console.log({ linkHandles })
         try {
-            console.log('linkHandles.reduce...')
+            //console.log('linkHandles.reduce...')
 
-            const __linksReducer = cfg__linksReducer({ topic_idx, subtopic_idx, topic_name, subtopic_name })
+            const __linksReducer = cfg__linksReducer({ topic_name, subtopic_name })
 
             let { data: acc } = await linkHandles.reduce(
                 __linksReducer,
@@ -300,7 +277,7 @@ topicPaginator(7) //?
  */
 async function topicPaginator(jump_to = 0, progress = []) {
     const browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         defaultViewport: {
             width,
             height,
@@ -315,7 +292,6 @@ async function topicPaginator(jump_to = 0, progress = []) {
     const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
 
     try {
-        console.log('topics.reduce...')
         const { data: payload } = await topics.reduce(async (a, c, topic_idx, d) => {
             if (topic_idx < jump_to) return await a
             let { page, data: acc } = await a
@@ -324,9 +300,7 @@ async function topicPaginator(jump_to = 0, progress = []) {
             }
             c.click()
             await page.waitForNetworkIdle()
-            await page.waitForTimeout(100)
-
-            console.log("getting c.$('.content-inner') in topicsPaginator")
+            //await page.waitForTimeout(100)
 
             const topicEl = await c.$('.content-inner')
             const topicText = await topicEl.getProperty('innerText')
@@ -340,8 +314,6 @@ async function topicPaginator(jump_to = 0, progress = []) {
             const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
 
             try {
-                console.log('subtopicEls.reduce...')
-
                 const __subtopicsReducer = cfg__subtopicsReducer({ topic_idx, topic_name })
                 let { data: subs } = await subtopicEls.reduce(__subtopicsReducer, Promise.resolve({ page, data: acc }))
 

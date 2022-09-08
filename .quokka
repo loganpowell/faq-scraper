@@ -9,7 +9,7 @@
     "plugins": [
         "jsdom-quokka-plugin"
     ],
-    "recycle": true,
+    "recycle": false,
     "hints": {
         "ignoreCoverage": "/ignore coverage/"
     }
