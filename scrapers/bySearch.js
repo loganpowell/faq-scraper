@@ -11,8 +11,7 @@ const headers = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 
-const url =
-    'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk1_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
+const url = 'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk1_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
 
 const getHtml = async () => {
     const html = await fetch(url, {
@@ -45,9 +44,7 @@ const getIndexByClassName = (className, list) => {
 
 const skipFirstPages = async (page) => {
     console.log('skipFirstPages')
-    const dotdot = await page.$$(
-        'content-item content-label item-3 remove-all-spacing standard_dataLabelWrite'
-    )
+    const dotdot = await page.$$('content-item content-label item-3 remove-all-spacing standard_dataLabelWrite')
     console.log({ dotdot })
     await page.evaluate(() => {
         const dotdot = document.getElementsByClassName(
@@ -66,18 +63,14 @@ const skipFirstPages = async (page) => {
 const fetchArticle = async (page, qLink, acc, i, PAGE, list = 0) => {
     console.log('fetchArticle', { PAGE, list })
     try {
-        const questionText = await (
-            await qLink.getProperty('textContent')
-        ).jsonValue()
+        const questionText = await (await qLink.getProperty('textContent')).jsonValue()
         //  console.log({ qLink });
         await qLink.click()
         await page.waitForNetworkIdle()
         //  await page.waitForTimeout(2000);
         const answerNodeCandidates = await page.$$('div.content-inner')
         const answerNode = answerNodeCandidates[8]
-        const answerHTML = await (
-            await answerNode.getProperty('innerHTML')
-        ).jsonValue()
+        const answerHTML = await (await answerNode.getProperty('innerHTML')).jsonValue()
 
         const answerMD = await html2MD.turndown(answerHTML)
         const backLink = await page.$('[data-ctl]')
@@ -143,23 +136,14 @@ const bigPaginator = async (list = 0, progress = []) => {
                     qLink = newHandles[i]
                     if (elementHandles.length === i + 1) {
                         console.log('NEXT PAGE:', NEXT_PAGE)
-                        const nextPageHandles = await page.$$(
-                            'a.KM_Article_link'
-                        )
-                        const newAcc = await fetchArticle(
-                            page,
-                            qLink,
-                            acc,
-                            i,
-                            PAGE,
-                            list
-                        )
+                        const nextPageHandles = await page.$$('a.KM_Article_link')
+                        const newAcc = await fetchArticle(page, qLink, acc, i, PAGE, list)
                         progress = newAcc
                         return newAcc.concat(
                             await parsePage(
                                 nextPageHandles,
-                                NEXT_PAGE,
-                                nextPageNavLink
+                                NEXT_PAGE
+                                //nextPageNavLink
                             )
                         )
                     }
@@ -169,11 +153,7 @@ const bigPaginator = async (list = 0, progress = []) => {
             }, Promise.resolve([]))
         } catch (err) {
             console.log('BUSTED! returning progress report:', err)
-            fs.writeFileSync(
-                `./json-results/list-${list}.json`,
-                JSON.stringify(progress, null, 2),
-                'utf-8'
-            )
+            fs.writeFileSync(`./json-results/list-${list}.json`, JSON.stringify(progress, null, 2), 'utf-8')
             browser.close()
 
             //return
@@ -186,11 +166,7 @@ const bigPaginator = async (list = 0, progress = []) => {
     //  const res = await Promise.all(elements);
     console.log('Done with list', list)
     browser.close()
-    fs.writeFileSync(
-        `./json-results/list-${list}.json`,
-        JSON.stringify(content, null, 2),
-        'utf-8'
-    )
+    fs.writeFileSync(`./json-results/list-${list}.json`, JSON.stringify(content, null, 2), 'utf-8')
     //  console.log(screenshot);
 }
 
@@ -208,11 +184,7 @@ const getAllPages = async () => {
 
 const getAndSaveAllPages = async () => {
     const allPagesContent = await getAllPages()
-    fs.writeFileSync(
-        './json-results/close3.json',
-        JSON.stringify(allPagesContent, null, 2),
-        'utf-8'
-    )
+    fs.writeFileSync('./json-results/close3.json', JSON.stringify(allPagesContent, null, 2), 'utf-8')
 }
 
 //getAllPages() //?

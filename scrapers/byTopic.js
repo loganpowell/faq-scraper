@@ -1,9 +1,11 @@
 //import { JSDOM } from 'jsdom'
 //import fetch from 'node-fetch'
-const puppeteer = require('puppeteer')
-//const TurndownService = require('turndown')
-const fs = require('fs')
+import puppeteer from 'puppeteer'
+//import TurndownService from 'turndown'
+import { promises as fs } from 'fs'
 //const html2MD = TurndownService()
+import hash from 'hash-string'
+import keyword from 'keyword-extractor'
 
 const headers = {
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
@@ -11,174 +13,57 @@ const headers = {
     'Accept-Language': 'en-US,en;q=0.9',
 }
 
-const url =
-    'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk2_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
+const url = 'https://ask.census.gov/prweb/PRServletCustom/app/ECORRAsk2_/YACFBFye-rFIz_FoGtyvDRUGg1Uzu5Mn*/!STANDARD'
 
-const getHtml = async () => {
-    const html = await fetch(url, {
-        method: 'GET',
-        headers,
-    })
-        .then((r) => r.text())
-        .catch((e) => {
-            console.log('error fetching:', e)
-            return ''
-        })
+const snake_caser = (str) => str.toLowerCase().replace(/\s/g, '_')
 
-    const { window } = await new JSDOM(html)
-
-    console.log(window)
-}
-
-const getIndexByClassName = (className, list) => {
-    return list.findIndex((x) => x.className === className)
-}
-
-/**
- * TODO:
- * Make work with "..." pagination (or just kludge)
- */
-
-const skipFirstPages = async (page) => {
-    console.log('skipFirstPages')
-    const dotdot = await page.$$(
-        'content-item content-label item-3 remove-all-spacing standard_dataLabelWrite'
-    )
-    console.log({ dotdot })
-    await page.evaluate(() => {
-        const dotdot = document.getElementsByClassName(
-            'content-item content-label item-3 remove-all-spacing standard_dataLabelWrite'
-        )[0]
-        console.log('dotdot', dotdot)
-        const clicker = dotdot.querySelector('a')
-        console.log('clicker', clicker)
-        clicker.click()
-        //return clicker
+const taginator = (str) =>
+    keyword.extract(str, {
+        language: 'english',
+        remove_digits: true,
+        return_changed_case: true,
+        remove_duplicates: true,
     })
 
-    await page.waitForNetworkIdle()
-}
-
-const export_structure = {
-    id: 'String',
-    tags: ['String', 'String', '...'],
-    content: {
-        title: 'String',
-        markUpText: 'HTML String',
-    },
-    folderMetadata: {
-        folderId: 'String', // subtopic ID
-        name: 'String', // subtopic name
-        parentId: 'String', // topic ID
-    },
-}
-
-const fetchArticle = async (page, qLink, acc, i, PAGE, list = 0) => {
-    console.log('fetchArticle', { PAGE, list })
+const scrapeFAQ = async ({ page, el, acc, topic_idx, subtopic_idx, topic_name, subtopic_name }) => {
     try {
-        const questionText = await (
-            await qLink.getProperty('textContent')
-        ).jsonValue()
-        //  console.log({ qLink });
-        await qLink.click()
+        const questionText = await (await el.getProperty('textContent')).jsonValue()
+        await el.click()
         await page.waitForNetworkIdle()
-        //  await page.waitForTimeout(2000);
+        await page.waitForTimeout(100)
         const answerNodeCandidates = await page.$$('div.content-inner')
         const answerNode = answerNodeCandidates[8]
-        const answerHTML = await (
-            await answerNode.getProperty('innerHTML')
-        ).jsonValue()
+        const answerHTML = await (await answerNode.getProperty('innerHTML')).jsonValue()
 
         //const answerMD = await html2MD.turndown(answerHTML)
         const backLink = await page.$('[data-ctl]')
+        // returns to first faq results page
         backLink.click()
         await page.waitForNetworkIdle()
-        //  await page.waitForTimeout(2000);
-        if (list !== 0) {
-            await skipFirstPages(page)
-            await page.waitForNetworkIdle()
-        }
+        await page.waitForTimeout(100)
 
-        return acc.concat({ questionText, answerHTML, PAGE, i })
-    } catch (err) {
-        console.log({ PAGE, i, err })
-        return acc.concat({ PAGE, i })
+        const output = {
+            id: hash(questionText),
+            tags: taginator(questionText),
+            content: {
+                title: questionText,
+                markUpText: answerHTML,
+            },
+            folderMetadata: {
+                folderId: snake_caser(subtopic_name),
+                name: subtopic_name,
+                parentId: snake_caser(topic_name),
+            },
+        }
+        console.log('FAQ scraped:', questionText)
+        return acc.concat(output)
+    } catch (Error) {
+        console.warn('ERROR: scrapeFAQ')
+        console.log(Error)
+        //acc = acc.concat({ topic_idx, subtopic_idx })
+        return acc
     }
 }
-
-const configParsePage = ({ page, progress, list, browser }) =>
-    async function parsePage(elementHandles, PAGE = 0) {
-        try {
-            return await elementHandles.reduce(async (a, qLink, i) => {
-                const acc = await a
-                // need to navigate to any page other than first on every new page parsing
-                const pagination = await page.$('.pagination-links')
-                const pageLinks = await pagination.$$('a')
-
-                //const pageLinksArray = Array.from(pageLinks)
-                //const currentPageIndex = getIndexByClassName(
-                //    pageLinksArray,
-                //    'inactiveLink'
-                //)
-                const NEXT_PAGE = PAGE + 1
-                const nextPageNavLink = pageLinks[NEXT_PAGE]
-                //await nextPageNavLink.click()
-                if (PAGE !== 0) {
-                    const thisPageLink = pageLinks[PAGE]
-                    await thisPageLink.click()
-                    await page.waitForNetworkIdle()
-                }
-                if (i !== 0) {
-                    // reparse article link list every iteration (original nodes are lost)
-                    await page.waitForNetworkIdle()
-                    const newHandles = await page.$$('a.KM_Article_link')
-                    qLink = newHandles[i]
-                    if (elementHandles.length === i + 1) {
-                        console.log('NEXT PAGE:', NEXT_PAGE)
-                        const nextPageHandles = await page.$$(
-                            'a.KM_Article_link'
-                        )
-                        const newAcc = await fetchArticle(
-                            page,
-                            qLink,
-                            acc,
-                            i,
-                            PAGE,
-                            list
-                        )
-                        progress = newAcc
-                        return newAcc.concat(
-                            await parsePage(
-                                nextPageHandles,
-                                NEXT_PAGE,
-                                nextPageNavLink
-                            )
-                        )
-                    }
-                }
-                progress = acc
-                return await fetchArticle(page, qLink, acc, i, PAGE)
-            }, Promise.resolve([]))
-        } catch (err) {
-            console.log('BUSTED! returning progress report:', err)
-            fs.writeFileSync(
-                `./json-results/list-${list}.json`,
-                JSON.stringify(progress, null, 2),
-                'utf-8'
-            )
-            browser.close()
-
-            //return
-        }
-    }
-
-const width = 1024
-const height = 2000
-//getHtml();
-
-;({
-    recycle: true, //<--
-})
 
 const getCurrentTopicHandle = async (page, index) => {
     const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
@@ -197,16 +82,223 @@ const getCurrentSubtopicHandle = async (page, topic_idx, subtopic_idx) => {
     return subtopicEls[subtopic_idx]
 }
 
+const json_dir = './json-results/topics.json'
+
+const cfg__linksReducer =
+    ({ topic_idx, subtopic_idx, topic_name, subtopic_name, on_page = 0 }) =>
+    async (a, c, i, d) => {
+        let { page, data: progress } = await a
+        await page.waitForNetworkIdle()
+
+        const pagination = await page.$('.pagination-links')
+
+        const faqLinks = await page.$$('a.KM_Article_link')
+
+        // WIP ///////////////////////////////////////////////
+        try {
+            if (pagination) {
+                //console.log('👀 pagination found')
+                const pageLinks = await pagination.$$('a')
+                const next_page = on_page + 1
+
+                /**
+                 * if not first page of results, navigate to proper page
+                 */
+                if (on_page) {
+                    console.log('👉 ON ANOTHER PAGE: ', on_page)
+
+                    const thisPageLink = pageLinks[on_page]
+                    //console.log({ thisPageLink })
+                    //await page.waitForTimeout(1000)
+                    /**
+                     * click on the pagination link for the current page...
+                     */
+                    await thisPageLink.click()
+                    await page.waitForNetworkIdle()
+
+                    //console.log('💧 WAITING FOR thisPageLink.click() to effect page')
+                    await page.waitForTimeout(100)
+                    /**
+                     * grab the FAQ links again after click()
+                     */
+                    const newLinks = await page.$$('a.KM_Article_link')
+                    c = newLinks[i]
+                }
+                /**
+                 * if not the first faq on the page, rebuild handlers
+                 */
+                if (i) {
+                    /**
+                     * grab the FAQ links again after click()
+                     */
+                    const newLinks = await page.$$('a.KM_Article_link')
+                    c = newLinks[i]
+                    //await page.waitForNetworkIdle()
+                    /**
+                     * last faq on list in this page
+                     */
+                    if (d.length === i + 1) {
+                        /**
+                         * retake links (they change in size depending on where you are in the list)
+                         */
+                        const updatedPagination = await page.$('.pagination-links')
+                        const updatedPageLinks = await updatedPagination.$$('a')
+                        console.log('🔍 updatedPageLinks.length:', updatedPageLinks.length)
+                        console.log('🔍 on_page:', on_page)
+                        console.log('🙌 NEXT PAGE COMING UP:', next_page)
+
+                        const newAcc = await scrapeFAQ({
+                            page,
+                            el: c,
+                            acc: progress,
+                            topic_idx,
+                            subtopic_idx,
+                            topic_name,
+                            subtopic_name,
+                        })
+                        // 👀
+                        if (updatedPageLinks.length === on_page + 1) {
+                            console.log('🔥 Last FAQ on last page! Should move on to next Subtopic')
+                            return {
+                                page,
+                                data: newAcc,
+                            }
+                        }
+                        const nextLinksReducer = cfg__linksReducer({
+                            topic_idx,
+                            subtopic_idx,
+                            topic_name,
+                            subtopic_name,
+                            on_page: next_page,
+                        })
+
+                        await page.waitForTimeout(100)
+
+                        const { data } = await newLinks.reduce(
+                            nextLinksReducer,
+                            Promise.resolve({ page, data: newAcc })
+                        )
+                        return {
+                            page,
+                            data,
+                        }
+                    }
+                }
+                /**
+                 * not on first page and first FAQ on that page
+                 */
+                const newAcc = await scrapeFAQ({
+                    page,
+                    el: c,
+                    acc: progress,
+                    topic_idx,
+                    subtopic_idx,
+                    topic_name,
+                    subtopic_name,
+                })
+
+                return {
+                    page,
+                    data: newAcc,
+                }
+            }
+            /////////////////////////////////////////////// WIP //
+
+            // not the first FAQ, need to grab the handes again
+            if (i) {
+                //console.log('not first faq on page')
+                //console.log({ links })
+                c = faqLinks[i]
+            }
+
+            const newAcc = await scrapeFAQ({
+                page,
+                el: c,
+                acc: progress,
+                topic_idx,
+                subtopic_idx,
+                topic_name,
+                subtopic_name,
+            })
+
+            return { page, data: newAcc }
+        } catch (Error) {
+            console.log('linksReducer BUSTED! returning progress report:')
+            console.log({ Error })
+            fs.writeFile(json_dir, JSON.stringify(progress, null, 2)).then(() => console.log('!!! \n SAVED FILE \n!!!'))
+        }
+    }
+
+/**
+ * first error boundary. I.e., doesn't store any progress to filesystem until at
+ * least one subtopic's FAQs have been completely scraped
+ */
+const cfg__subtopicsReducer =
+    ({ topic_idx, topic_name }) =>
+    async (a, c, subtopic_idx, d) => {
+        let { page, data: progress } = await a
+        if (subtopic_idx) {
+            c = await getCurrentSubtopicHandle(page, topic_idx, subtopic_idx)
+        }
+        console.log("getting c.$('td') in subtopicsReducer")
+        let subtopicEl = await c.$('td')
+        // load faqs for subtopic
+        const subTopicText = await subtopicEl.getProperty('innerText')
+
+        // pipe down
+        const subtopic_name = await subTopicText.jsonValue()
+
+        console.log({ subtopic_name })
+
+        await subtopicEl.click()
+        await page.waitForNetworkIdle()
+        await page.waitForTimeout(100)
+
+        //await page.waitForTimeout(1000)
+
+        let linkHandles = await page.$$('a.KM_Article_link')
+
+        //console.log({ linkHandles })
+        try {
+            console.log('linkHandles.reduce...')
+
+            const __linksReducer = cfg__linksReducer({ topic_idx, subtopic_idx, topic_name, subtopic_name })
+
+            let { data: acc } = await linkHandles.reduce(
+                __linksReducer,
+                Promise.resolve({
+                    page,
+                    data: progress,
+                })
+            )
+
+            return {
+                page,
+                data: acc,
+            }
+        } catch (Error) {
+            console.warn('ERROR: scraping FAQ list')
+            console.log({ Error })
+            //fs.writeFile(json_dir, JSON.stringify(progress)).then(() =>
+            //    console.log('saved progress after scraping FAQ list bailed:', json_dir)
+            //)
+        }
+    }
+
+const width = 1024
+const height = 2000
+
+topicPaginator(7) //?
+
 /**
  * TODO:
  * - handle paginated subtopic results
  * - sometimes it just breaks:
- *   - enable starting at a specific subtopic index
+ *   - enable starting at a specific subtopic index ✅
  *   - store results and return on error (try catch)
  *
  */
-const topicPaginator = async (list = 0, progress = []) => {
-    console.log('topicPaginator', `list = ${list}`)
+async function topicPaginator(jump_to = 0, progress = []) {
     const browser = await puppeteer.launch({
         headless: false,
         defaultViewport: {
@@ -222,220 +314,61 @@ const topicPaginator = async (list = 0, progress = []) => {
 
     const topics = await page.$$("[node_name='TaxonomyListTreeInner']")
 
-    const out = await topics.reduce(async (a, c, topic_idx, d) => {
-        const { page, data } = await a
-        if (topic_idx !== 0) {
-            c = await getCurrentTopicHandle(page, topic_idx)
-        }
-        c.click()
-        await page.waitForNetworkIdle()
-        await page.waitForTimeout(2000)
-        const topicEl = await c.$('.content-inner')
-        const topicText = await topicEl.getProperty('innerText')
-        const topic_name = await topicText.jsonValue()
-        console.log({ topic_name })
-        const topicParent = await c.getProperty('parentNode')
-        const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
-        const subtopics = await subtopicEls.reduce(
-            async (a, c, subtopic_idx, d) => {
-                const { page, data } = await a
-                if (subtopic_idx !== 0) {
-                    c = await getCurrentSubtopicHandle(
-                        page,
-                        topic_idx,
-                        subtopic_idx
-                    )
+    try {
+        console.log('topics.reduce...')
+        const { data: payload } = await topics.reduce(async (a, c, topic_idx, d) => {
+            if (topic_idx < jump_to) return await a
+            let { page, data: acc } = await a
+            if (topic_idx) {
+                c = await getCurrentTopicHandle(page, topic_idx)
+            }
+            c.click()
+            await page.waitForNetworkIdle()
+            await page.waitForTimeout(100)
+
+            console.log("getting c.$('.content-inner') in topicsPaginator")
+
+            const topicEl = await c.$('.content-inner')
+            const topicText = await topicEl.getProperty('innerText')
+
+            // pipe down
+            const topic_name = await topicText.jsonValue()
+
+            console.log({ topic_name })
+
+            const topicParent = await c.getProperty('parentNode')
+            const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
+
+            try {
+                console.log('subtopicEls.reduce...')
+
+                const __subtopicsReducer = cfg__subtopicsReducer({ topic_idx, topic_name })
+                let { data: subs } = await subtopicEls.reduce(__subtopicsReducer, Promise.resolve({ page, data: acc }))
+
+                return {
+                    page,
+                    data: subs,
                 }
-                let subtopicEl = await c.$('td')
-                // load faqs for subtopic
-                const subTopicText = await subtopicEl.getProperty('innerText')
-                const subtopic_name = await subTopicText.jsonValue()
-                console.log({ subtopic_name })
+            } catch (Error) {
+                console.warn('ERROR: subtopics reducer')
+                console.log({ Error })
+                //fs.writeFile(json_dir, JSON.stringify(progress)).then(() =>
+                //    console.log('saved progress after subtopics reducer bailed:', json_dir)
+                //)
+            }
+        }, Promise.resolve({ page, data: progress }))
 
-                await subtopicEl.click()
-                await page.waitForNetworkIdle()
-                await page.waitForTimeout(2000)
-
-                //if (list !== 0) {
-                //    await skipFirstPages(page)
-                //}
-
-                let elementHandles = await page.$$('a.KM_Article_link')
-
-                let tmp = []
-                //console.log({ elementHandles })
-                try {
-                    const faqs = await elementHandles.reduce(
-                        async (a, c, i, d) => {
-                            const { page, data } = await a
-                            const pagination = await page.$('.pagination-links')
-                            // not the first FAQ, need to grab the handes again
-                            if (i !== 0) {
-                                let newHandles = await page.$$(
-                                    'a.KM_Article_link'
-                                )
-                                const newAcc = await fetchArticle(
-                                    page,
-                                    newHandles[i],
-                                    tmp,
-                                    i,
-                                    0,
-                                    list
-                                )
-                                //console.log('not first', { newAcc })
-                                return { page, data: [...data, ...newAcc] }
-                            }
-                            if (pagination) {
-                                // parsePaginatedPage
-                                //
-                                console.log('pagination found')
-                            }
-                            const newAcc = await fetchArticle(
-                                page,
-                                c,
-                                tmp,
-                                i,
-                                0,
-                                list
-                            )
-                            console.log({ newAcc })
-                            return { page, data: [...data, ...newAcc] }
-                        },
-                        Promise.resolve({ page, data: [] })
-                    )
-
-                    return {
-                        page,
-                        data: [...data, { subtopic_name, faqs: faqs.data }],
-                    }
-                } catch (err) {
-                    console.log('SHIT:', err)
-                    console.log('progress report:\n', tmp)
-                }
-
-                //const candidates = await parsePage(elementHandles)
-            },
-            Promise.resolve({ page, data: [] })
-        )
-
-        return await { page, data: [...data, { [topic_name]: subtopics }] }
-    }, Promise.resolve({ page, data: [] }))
-
-    console.log({ out })
+        fs.writeFile(json_dir, JSON.stringify(payload)).then(() => console.log('SUCCESS: topics written to:', json_dir))
+        //console.log({ out })
+    } catch (Error) {
+        console.warn('ERROR: topics reducer')
+        console.log({ Error })
+        //fs.writeFile(json_dir, JSON.stringify(progress)).then(() =>
+        //    console.log('saved progress after subtopics reducer bailed:', json_dir)
+        //)
+    }
     //const todos = Array.from(topics).map((bloop) => console.log({ bloop }))
     //console.log({ topics })
 
-    // using evaluate ///////////////////////////////////////////////
-
-    //const body = await page.$('body')
-    ////console.log({ body })
-
-    //page.on('console', (message) =>
-    //    console.log(
-    //        `${message.type().substr(0, 3).toUpperCase()} ${message.text()}`
-    //    )
-    //)
-    //    .on('pageerror', ({ message }) => console.log(message))
-    //    .on('response', (response) =>
-    //        console.log(`${response.status()} ${response.url()}`)
-    //    )
-    //    .on('requestfailed', (request) =>
-    //        console.log(`${request.failure().errorText} ${request.url()}`)
-    //    )
-
-    //const nodeList = await page.evaluate(
-    //    /* ignore coverage */ (_body) => {
-    //        //console.log('in body', _body)
-    //        //return _body.querySelector("[node_name='TaxonomyListTree']")
-    //        let table = _body.querySelector("[node_name='TaxonomyListTree']")
-
-    //        let topics = table.querySelectorAll(
-    //            "[node_name='TaxonomyListTreeInner']"
-    //        )
-    //        return Array.from(topics).map((topic) => {
-    //            //topic.click()
-    //            const subtopics = topic.querySelectorAll('tr[data-gargs*=TAX')
-    //            console.log(subtopics.toString())
-    //            return Array.from(subtopics).map((st) => st.innerHTML)
-    //            const payload = Array.from(subtopics).reduce((a, c, i, d) => {
-    //                console.log({ c })
-    //                const text = c.querySelector('td').innerText
-    //                console.log({ text })
-    //                return [...a, { text }]
-    //            }, [])
-    //            return payload
-    //        })
-    //    },
-    //    body
-    //)
-    //console.log({ nodeList })
-
-    /////////////////////////////////////////////// using evaluate //
-
     browser.close()
 }
-
-topicPaginator() //?
-
-const searchPaginator = async (list = 0, progress = []) => {
-    console.log('searchPaginator', `list = ${list}`)
-    const browser = await puppeteer.launch({
-        headless: false,
-        defaultViewport: { width: width, height: height },
-    })
-    const page = await browser.newPage()
-    await page.setViewport({ width: width, height: height })
-    await page.goto(url)
-    await page.type('[name="$PKMHelpPortal$pKMSearchText"]', 'the')
-    await page.click('[data-click="...."]')
-    await page.waitForNetworkIdle()
-    //page.
-
-    if (list !== 0) {
-        await skipFirstPages(page)
-    }
-    let elementHandles = await page.$$('a.KM_Article_link')
-
-    const parsePage = configParsePage({
-        page,
-        browser,
-        list,
-        progress,
-    })
-
-    const candidates = await parsePage(elementHandles)
-
-    const content = candidates.filter((x) => !!x)
-    //  const res = await Promise.all(elements);
-    console.log('Done with list', list)
-    browser.close()
-    fs.writeFileSync(
-        `./json-results/list-${list}.json`,
-        JSON.stringify(content, null, 2),
-        'utf-8'
-    )
-    //  console.log(screenshot);
-}
-
-const getAllPages = async () => {
-    try {
-        await [0 /*,1 */].reduce(async (a, c) => {
-            const acc = await a
-            const content = await searchPaginator(c, acc)
-            return acc.concat(content)
-        }, Promise.resolve([]))
-    } catch (error) {
-        console.log(error)
-    }
-}
-
-const getAndSaveAllPages = async () => {
-    const allPagesContent = await getAllPages()
-    fs.writeFileSync(
-        './json-results/close3.json',
-        JSON.stringify(allPagesContent, null, 2),
-        'utf-8'
-    )
-}
-
-//getAllPages() //?

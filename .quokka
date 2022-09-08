@@ -2,7 +2,8 @@
     "babel": false,
     "env": {
         "params": {
-            "env": "NODE_PATH=./src"
+            "env": "NODE_PATH=./src",
+            "runner": "--max-old-space-size=8192"
         }
     },
     "plugins": [

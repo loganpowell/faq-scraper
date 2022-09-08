@@ -18,7 +18,9 @@
     },
     "homepage": "https://github.com/loganpowell/faq-scraper#readme",
     "dependencies": {
+        "hash-string": "^1.0.0",
         "jsdom": "^19.0.0",
+        "keyword-extractor": "^0.0.23",
         "node-fetch": "^3.2.4",
         "puppeteer": "^13.7.0",
         "turndown": "^7.1.1"
@@ -31,6 +33,7 @@
         "tabWidth": 4,
         "semi": false,
         "singleQuote": true,
-        "arrow-parents": "avoid"
+        "arrow-parents": "avoid",
+        "printWidth": 120
     }
 }

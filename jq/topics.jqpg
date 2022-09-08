@@ -1,0 +1,2 @@
+jq '. | length'
+D:\projects\census\microservices\faq-scraper\json-results\topics.json
