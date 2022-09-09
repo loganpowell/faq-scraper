@@ -27,22 +27,23 @@ const taginator = (str) =>
 
 const scrapeFAQ = async ({ page, faqLink, acc, topic_name, subtopic_name }) => {
     try {
-        await page.waitForNetworkIdle()
         const questionText = await (await faqLink.getProperty('textContent')).jsonValue()
         await faqLink.click()
         await page.waitForNetworkIdle()
-        await page.waitForTimeout(100)
+
         const answerNodeCandidates = await page.$$('div.content-inner')
         const answerNode = answerNodeCandidates[8]
-        const answerHTML = await (await answerNode.getProperty('innerHTML')).jsonValue()
 
-        //const answerMD = await html2MD.turndown(answerHTML)
-        const backLink = await page.$('[data-ctl]')
+        const watchBack = page.waitForSelector('[data-ctl]')
+        const backLink = await watchBack
+
         // returns to first faq results page
         await backLink.click()
         await page.waitForNetworkIdle()
-        //console.log('waiting for page to rerender after clicking back...')
-        await page.waitForTimeout(100)
+
+        const answer = await answerNode.getProperty('innerHTML')
+        //const answerMD = await html2MD.turndown(answerHTML)
+        const answerHTML = await answer.jsonValue()
 
         const output = {
             id: hash(questionText),
@@ -80,11 +81,6 @@ const getCurrentTopicHandle = async (page, index) => {
 
 const getCurrentSubtopicHandle = async (page, topic_idx, subtopic_idx) => {
     const currentTopic = await getCurrentTopicHandle(page, topic_idx)
-    //console.log({ currentTopic })
-    const topicEl = await currentTopic.$('.content-inner')
-    const topicText = await topicEl.getProperty('innerText')
-    const topic_name = await topicText.jsonValue()
-    //console.log({ topic_name })
     const topicParent = await currentTopic.getProperty('parentNode')
     const subtopicEls = await topicParent.$$('tr[data-gargs*=TAX')
     return subtopicEls[subtopic_idx]
@@ -99,11 +95,10 @@ const cfg__linksReducer =
 
         console.log(`FAQ list item ${i} on page ${on_page}:`)
 
-        const paginationMenu = await page.$('.pagination-links')
+        const pageLinks = await page.$$('.pagination-links a')
 
         try {
-            if (paginationMenu) {
-                const pageLinks = await paginationMenu.$$('a')
+            if (pageLinks.length) {
                 const next_page = on_page + 1
                 if (on_page) {
                     const thisPageLink = pageLinks[on_page]
@@ -120,6 +115,13 @@ const cfg__linksReducer =
                 // LAST LINK ON LAST PAGE ///////////////////////////////////////////////
 
                 if (faqLinks.length === i + 1) {
+                    const newAcc = await scrapeFAQ({
+                        page,
+                        faqLink: faqLinks[i],
+                        acc: progress,
+                        topic_name,
+                        subtopic_name,
+                    })
                     console.log(
                         'last faq link in list/page\n' +
                             '<...> retargeting :\n' +
@@ -128,21 +130,34 @@ const cfg__linksReducer =
                             `🙌 PAGE COMING UP NEXT: ${next_page}`
                     )
 
-                    const newAcc = await scrapeFAQ({
-                        page,
-                        faqLink: faqLinks[i],
-                        acc: progress,
-                        topic_name,
-                        subtopic_name,
-                    })
-                    await page.waitForNetworkIdle()
-                    await page.waitForTimeout(1000)
-                    const updatedPagination = await page.$('.pagination-links')
-                    const updatedPageLinks = await updatedPagination.$$('a')
+                    let updatedPagination
+                    try {
+                        updatedPagination = await page.waitForSelector('.pagination-links', {
+                            timeout: 2000,
+                        })
+                    } catch (err) {
+                        console.log('stuck waiting for pagination links...')
+                        try {
+                            const watchBack = page.waitForSelector('[data-ctl]', { timeout: 2000 })
+                            const backLink = await watchBack
+                            await backLink.click()
+                            console.log('waiting for updatedPagination timeout')
+                            updatedPagination = await page.waitForSelector('.pagination-links', {
+                                timeout: 2000,
+                            })
+                        } catch (err) {
+                            console.log('waiting for backlink timeout')
+                        }
+                    }
+
+                    const updatedPaginationMenu = await updatedPagination
+
+                    const updatedPageLinks = await updatedPaginationMenu.$$('a')
+
                     const pages_number = updatedPageLinks.length - 2
 
                     if (pages_number === on_page) {
-                        console.log('🔥 last item in list on last page 🔥')
+                        console.log('🔥 finished last item in list on last page 🔥')
                         return {
                             page,
                             data: newAcc,
@@ -265,7 +280,7 @@ const cfg__subtopicsReducer =
 const width = 1024
 const height = 2000
 
-topicPaginator(7) //?
+topicPaginator() //?
 
 /**
  * TODO:
@@ -277,7 +292,7 @@ topicPaginator(7) //?
  */
 async function topicPaginator(jump_to = 0, progress = []) {
     const browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         defaultViewport: {
             width,
             height,
